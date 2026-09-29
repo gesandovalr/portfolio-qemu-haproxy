@@ -1,0 +1,33 @@
+## KeepAlived Configuration
+
+global_defs {
+}
+
+vrrp_script check_haproxy {
+      script "/usr/libexec/keepalived/check_haproxy.sh"
+      interval 2
+      weight 50
+}
+
+vrrp_instance VI_1 {
+        state MASTER
+        interface {{var_group.interface_name}}
+        virtual_router_id 90
+        priority 100
+        advert_int 1
+        #nopreempt
+        authentication {
+              auth_type PASS
+              auth_pass FpN$4444.!!
+        }
+        unicast_src_ip {{var_group.keepalived_node_01_ip_address}}
+        unicast_peer {
+        {{var_group.keepalived_node_02_ip_address}}
+        }
+        virtual_ipaddress {
+              {{var_group.keepalived_VIP_ip_address}}/24
+        }
+        track_script {
+        check_haproxy
+        }
+}

@@ -1,0 +1,7 @@
+#!/bin/bash
+
+if systemctl is-active --quiet haproxy; then
+    echo "running"
+else 
+    systemctl stop keepalived
+fi

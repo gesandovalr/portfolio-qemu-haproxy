@@ -1,0 +1,105 @@
+#---------------------------------------------------------------------
+# haproxy configuration EQF Project
+#---------------------------------------------------------------------
+
+#---------------------------------------------------------------------
+# Global settings
+#---------------------------------------------------------------------
+global
+    # to have these messages end up in /var/log/haproxy.log you will
+    # need to:
+    #
+    # 1) configure syslog to accept network log events.  This is done
+    #    by adding the '-r' option to the SYSLOGD_OPTIONS in
+    #    /etc/sysconfig/syslog
+    #
+    # 2) configure local2 events to go to the /var/log/haproxy.log
+    #   file. A line like the following can be added to
+    #   /etc/sysconfig/syslog
+    #
+    #local2.*                       /var/log/haproxy.log
+    #
+    #log         127.0.0.1 local2
+    
+    ##Enable Rsyslog for haproxy
+    log         /dev/log local0
+    chroot      /var/lib/haproxy
+    pidfile     /var/run/haproxy.pid
+    maxconn     5000
+    user        haproxy
+    group       haproxy
+    daemon
+
+    # turn on stats unix socket
+    stats socket /var/lib/haproxy/stats
+
+    # utilize system-wide crypto-policies
+    ssl-default-bind-ciphers PROFILE=SYSTEM
+    ssl-default-server-ciphers PROFILE=SYSTEM
+
+#---------------------------------------------------------------------
+# common defaults that all the 'listen' and 'backend' sections will
+# use if not designated in their block
+#---------------------------------------------------------------------
+defaults
+    #mode                    http
+    log                     global
+    option                  httplog
+    option                  dontlognull
+    option                  http-server-close
+    option forwardfor       except 127.0.0.0/8
+    option                  redispatch
+    retries                 3
+    timeout http-request    10s
+    timeout queue           1m
+    timeout connect         10s
+    timeout client          1m
+    timeout server          1m
+    timeout http-keep-alive 10s
+    timeout check           10s
+    maxconn                 15000
+
+#--------------------------------------------------------------------------------------------------
+# Backend leastConn Example
+#--------------------------------------------------------------------------------------------------
+backend my_backend
+    mode http
+    stats enable
+    stats uri /haproxy?stats
+    balance leastconn
+    cookie appid insert indirect nocache
+    server app1 10.10.40.13:80 check inter 10s fall 5 rise 5 cookie app1
+
+#-----------------------------------------------------------------------------------------
+# Frontend Example
+#-----------------------------------------------------------------------------------------
+frontend my_frontend
+    bind *:80
+    mode http
+    option tcplog
+    default_backend my_backend
+
+###################################################################################################################
+
+#--------------------------------------------------------------------------------------------------
+# Backend leastConn method for balacing used my.prequasolutions.com with cookie and sticky sessions
+#--------------------------------------------------------------------------------------------------
+#backend my.prequalsolutions.com
+#    mode http
+#    balance leastconn
+#    server  pod1 127.0.0.1:49152 check cookie pod1
+#    server  pod2 127.0.0.1:49153 check cookie pod2
+#    server  pod3 127.0.0.1:49152 check cookie pod3
+#    server  pod4 127.0.0.1:49153 check cookie pod4
+#    server  pod5 127.0.0.1:49152 check cookie pod5
+#    server  pod6 127.0.0.1:49153 check cookie pod6
+#    server  pod7 127.0.0.1:49152 check cookie pod7
+#    server  pod8 127.0.0.1:49153 check cookie pod8
+
+#-----------------------------------------------------------------------------------------
+# Frontend my.prequasolutions.com 
+#-----------------------------------------------------------------------------------------
+#frontend frontend_my_prequalsolutions.com
+#    bind *:80
+#    mode http
+#    default_backend my.prequalsolutions.com

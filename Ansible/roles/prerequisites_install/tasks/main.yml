@@ -1,0 +1,55 @@
+---
+  #- name: pre-tasks update before deployment
+  #  ansible.builtin.dnf:
+  #    name: "*"
+  #    state: latest
+  #    security: true
+
+  - name: Import key for epel repo
+    ansible.builtin.rpm_key:
+      state: present
+      key: https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-9
+  
+  - name: Ensure epel repo present
+    ansible.builtin.dnf:
+      name: https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+      state: present
+    become: true
+
+  - name: install firewalld package
+    ansible.builtin.dnf:
+      name: "firewalld"
+      state: latest
+  
+  - name: Start service firewalld, if not started
+    ansible.builtin.service:
+      name: firewalld
+      state: started
+      enabled: true
+
+  - name: install policycoreutils package
+    ansible.builtin.dnf:
+      name: "policycoreutils-python-utils"
+      state: latest
+
+  - name: Allow port SSH
+    ansible.posix.firewalld:
+      permanent: yes
+      immediate: yes
+      port: "22/tcp"
+      state: enabled
+    
+  - name: Install net tools
+    ansible.builtin.dnf:
+      name: net-tools
+      state: latest
+  
+  - name: Install telnet client
+    ansible.builtin.dnf:
+      name: telnet
+      state: latest
+  
+  - name: Install bind utils
+    ansible.builtin.dnf:
+      name: bind-utils
+      state: latest

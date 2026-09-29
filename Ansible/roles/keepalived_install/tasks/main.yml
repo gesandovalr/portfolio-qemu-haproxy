@@ -1,0 +1,65 @@
+---
+## Install Keepalived Package
+  - name: Install keepalived
+    ansible.builtin.dnf:
+      name: keepalived
+      state: latest
+
+## Deploy the configuration files using the J2 templates the condition is met when the inventory_hostname matches we are taking the ansible_inventory hostname 
+  - name: Add J2 template for Keepalived
+    template:
+      src: templates/keepalived.conf-h1.j2
+      dest: "/etc/keepalived/keepalived.conf"
+    when: ansible_hostname in [var_group.node_01_hostname]
+  
+  - name: Add J2 template for Keepalived
+    template:
+      src: templates/keepalived.conf-h2.j2
+      dest: "/etc/keepalived/keepalived.conf"
+    when: ansible_hostname in [var_group.node_02_hostname]
+
+## Script check for keepalived
+## this is a simple script to test the HAproxy service 
+## If the HAproxy service is stopped for any reason keeaplived will be stopped then moved to the backup instance
+
+## Deploy the configuration files using the J2 templates the condition is met when the inventory_hostname matches we are taking the ansible inventory_hostname 
+  - name: Add J2 template track script for Keepalived
+    template:
+      src: templates/check_haproxy.sh.j2
+      dest: "/usr/libexec/keepalived/check_haproxy.sh"
+      mode: +x
+    when: ansible_hostname in [var_group.node_01_hostname]
+  
+  - name: Add J2 template track script for Keepalived
+    template:
+      src: templates/check_haproxy.sh.j2
+      dest: "/usr/libexec/keepalived/check_haproxy.sh"
+      mode: +x
+    when: ansible_hostname in [var_group.node_02_hostname]
+
+## Selinux permission for track script on HAProxy Keepalived
+  - name: give permissions to track script to run using chcon
+    shell: chcon -t keepalived_unconfined_script_exec_t /usr/libexec/keepalived/check_haproxy.sh
+    when: ansible_hostname in [var_group.node_01_hostname]
+
+## Selinux permission for track script on HAProxy Keepalived
+  - name: give permissions to track script to run using chcon
+    shell: chcon -t keepalived_unconfined_script_exec_t /usr/libexec/keepalived/check_haproxy.sh
+    when: ansible_hostname in [var_group.node_02_hostname]
+  
+  ## Selinux permission for track script
+  - name: Restorecon check_haproxy.sh
+    shell: restorecon -v /usr/libexec/keepalived/check_haproxy.sh
+    when: ansible_hostname in [var_group.node_01_hostname]
+  
+  ## Selinux permission for track script
+  - name: Restorecon check_haproxy.sh
+    shell: restorecon -v /usr/libexec/keepalived/check_haproxy.sh
+    when: ansible_hostname in [var_group.node_02_hostname]
+
+  ## Start Keepalived service and enable it
+  - name: start keepalived
+    ansible.builtin.service:
+      name: keepalived
+      state: started
+      enabled: true

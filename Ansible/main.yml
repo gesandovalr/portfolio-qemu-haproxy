@@ -1,0 +1,18 @@
+---
+  - name: Haproxy Install
+    hosts: all
+    become: true
+    vars:
+      search_text_1: "#module(load=\"imudp\")"
+      replace_text_1: "module(load=\"imudp\")"
+      search_text_2: "#input(type=\"imudp\" port=\"514\")"
+      replace_text_2: "input(type=\"imudp\" port=\"514\")"
+
+    vars_files:
+      - group_vars/all.yaml
+      - group_vars/deploy_info.yaml
+
+    roles:
+      - prerequisites_install
+      - haproxy_install
+      - keepalived_install
