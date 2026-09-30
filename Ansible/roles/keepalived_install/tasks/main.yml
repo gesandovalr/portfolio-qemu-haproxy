@@ -3,7 +3,7 @@
   - name: Install keepalived
     ansible.builtin.dnf:
       name: keepalived
-      state: latest
+      state: present
 
 ## Deploy the configuration files using the J2 templates the condition is met when the inventory_hostname matches we are taking the ansible_inventory hostname 
   - name: Add J2 template for Keepalived

@@ -18,7 +18,7 @@ vrrp_instance VI_1 {
         #nopreempt
         authentication {
               auth_type PASS
-              auth_pass FpN$4444.!!
+              auth_pass mypass$444
         }
         unicast_src_ip {{var_group.keepalived_node_02_ip_address}}
         unicast_peer {

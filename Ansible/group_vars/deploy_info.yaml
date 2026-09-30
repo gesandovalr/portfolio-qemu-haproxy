@@ -1,7 +1,7 @@
 var_group:
-  keepalived_node_01_ip_address: 10.10.20.10
-  keepalived_node_02_ip_address: 10.10.20.11
-  keepalived_VIP_ip_address: 10.10.20.12
+  keepalived_node_01_ip_address: 10.20.10.10
+  keepalived_node_02_ip_address: 10.20.10.11
+  keepalived_VIP_ip_address: 10.20.10.12
   node_01_hostname: HAPRXTEST01
   node_02_hostname: HAPRXTEST02
-  interface_name: eth0  
+  interface_name: eth0

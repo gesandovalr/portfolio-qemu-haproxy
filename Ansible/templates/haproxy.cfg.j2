@@ -1,5 +1,5 @@
 #---------------------------------------------------------------------
-# haproxy configuration EQF Project
+# haproxy configuration mypod.com Project
 #---------------------------------------------------------------------
 
 #---------------------------------------------------------------------
@@ -82,9 +82,9 @@ frontend my_frontend
 ###################################################################################################################
 
 #--------------------------------------------------------------------------------------------------
-# Backend leastConn method for balacing used my.prequasolutions.com with cookie and sticky sessions
+# Backend leastConn method for balacing used my.pod.com with cookie and sticky sessions
 #--------------------------------------------------------------------------------------------------
-#backend my.prequalsolutions.com
+#backend my.pod.com
 #    mode http
 #    balance leastconn
 #    server  pod1 127.0.0.1:49152 check cookie pod1
@@ -99,7 +99,7 @@ frontend my_frontend
 #-----------------------------------------------------------------------------------------
 # Frontend my.prequasolutions.com 
 #-----------------------------------------------------------------------------------------
-#frontend frontend_my_prequalsolutions.com
+#frontend frontend_my_pod.com
 #    bind *:80
 #    mode http
-#    default_backend my.prequalsolutions.com
+#    default_backend my.pod.com

@@ -1,98 +1,99 @@
 ---
 ## Install HAproxy Service
-  - name: Install haproxy
-    ansible.builtin.dnf:
-      name: haproxy
-      state: latest
+- name: Install haproxy
+  ansible.builtin.dnf:
+    name: haproxy
+    state: latest
 
-## Deploy the configuration files using the J2 templates the condition is met when the inventory_hostname matches we are taking the ansible_inventory hostname 
-  - name: Add J2 template for HAProxy
-    template:
-      src: templates/haproxy.cfg.j2
-      dest: "/etc/haproxy/haproxy.cfg"
+# Deploy the configuration files using the J2 templates the condition is met when the inventory_hostname matches we are taking the ansible_inventory hostname 
+- name: Add J2 template for HAProxy
+  ansible.builtin.template:
+    src: templates/haproxy.cfg.j2
+    dest: "/etc/haproxy/haproxy.cfg"
+
+# Create HAProxy Dir for Healthcheck script
+- name: Create log directory for HAproxy
+  ansible.builtin.file:
+    path: /var/lib/haproxy/dev
+    owner: root
+    group: root
+    state: directory
+    recurse: true
 
 ## Create HAProxy Dir for Healthcheck script
-  - name: Create log directory for HAproxy
-    ansible.builtin.file:
-      path: /var/lib/haproxy/dev
-      owner: root
-      group: root
-      state: directory
-      recurse: true
-
-## Create HAProxy Dir for Healthcheck script
-  - name: Create HAproxy Directory
-    ansible.builtin.file:
-      path: /usr/libexec/haproxy
-      owner: root
-      group: root
-      mode: '0644'
-      state: directory
+- name: Create HAproxy Directory
+  ansible.builtin.file:
+    path: /usr/libexec/haproxy
+    owner: root
+    group: root
+    mode: '0644'
+    state: directory
 
 ## Check script Policy for backends
-  - name: Add J2 template for HAProxy check url script
-    template:
-      src: templates/health_check_url.sh.j2
-      dest: "/usr/libexec/haproxy/health_check_url.sh"
-      mode: +x
+- name: Add J2 template for HAProxy check url script
+  ansible.builtin.template:
+    src: templates/health_check_url.sh.j2
+    dest: "/usr/libexec/haproxy/health_check_url.sh"
+    mode: +x
 
 ## Restorecon HAProxy dir /usr/libexec/haproxy
-  - name: Create HAproxy Directory
-    shell: restorecon -RvF /usr/libexec/haproxy
+- name: Create HAproxy Directory
+  ansible.builtin.command: restorecon -RvF /usr/libexec/haproxy
 
 ## Add J2 template for haproxy logging policy
-  - name: Add J2 template for rsyslog policy
-    template:
-      src: templates/99_haproxy.conf.j2
-      dest: "/etc/rsyslog.d/99-haproxy.conf"
+- name: Add J2 template for rsyslog policy
+  ansible.builtin.template:
+    src: templates/99_haproxy.conf.j2
+    dest: "/etc/rsyslog.d/99-haproxy.conf"
 
 ## Enable Rsyslog new config file  
-  - name: Add J2 template for rsyslog conf file
-    template:
-      src: templates/rsyslog_conf.j2
-      dest: "/etc/rsyslog.conf"
-      owner: root
-      group: root
-      mode: 644
+- name: Add J2 template for rsyslog conf file
+  ansible.builtin.template:
+    src: templates/rsyslog_conf.j2
+    dest: "/etc/rsyslog.conf"
+    owner: root
+    group: root
+    mode: '0644'
 
 ## Restorecon for /etc/rsyslog.conf
-  - name: Permission for new rsyslog config gile
-    shell: restorecon -v "/etc/rsyslog.conf"
+- name: Permission for new rsyslog config gile
+  ansible.builtin.command: restorecon -v "/etc/rsyslog.conf"
 
 ## Add J2 template for rsyslog
-  - name: Add J2 template for rsyslog policy
-    template:
-      src: templates/rsyslog_haproxy.te.j2
-      dest: "/tmp/rsyslog-haproxy.te" 
+- name: Add J2 template for rsyslog policy
+  ansible.builtin.template:
+    src: templates/rsyslog_haproxy.te.j2
+    dest: "/tmp/rsyslog-haproxy.te"
+    mode: '0644'
 
 ## Add Policy Module
-  - name: Add policy module
-    args:
-      chdir: /tmp
-    shell: checkmodule -M -m rsyslog-haproxy.te -o rsyslog-haproxy.mod && semodule_package -o rsyslog-haproxy.pp -m rsyslog-haproxy.mod
+- name: Add policy module
+  args:
+    chdir: /tmp
+  ansible.builtin.command: setsebool -P haproxy_connect_any on
 
-## Compile Policy Module   
-  - name: compile policy module
-    shell: semodule -i rsyslog-haproxy.pp
-    args:
-      chdir: /tmp
+## Compile Policy Module
+# - name: Compile policy module
+#  ansible.builtin.command: semodule -i rsyslog-haproxy.pp
+#  args:
+#    chdir: /tmp
 
 ## Restart syslog
-  - name: Restart service rsyslog
-    ansible.builtin.service:
-      name: rsyslog
-      state: restarted
+- name: Restart service rsyslog
+  ansible.builtin.service:
+    name: rsyslog
+    state: restarted
 
 ## Start Keepalived service and enable it
-  - name: start haproxy
-    ansible.builtin.service:
-      name: haproxy
-      state: started
-      enabled: true
+- name: Start haproxy
+  ansible.builtin.service:
+    name: haproxy
+    state: started
+    enabled: true
 
 ## Enable HAproxy Setsebool
-  - name: Set haproxy_connect_any flag on and keep it persistent across reboots
-    ansible.posix.seboolean:
-      name: haproxy_connect_any
-      state: true
-      persistent: true
+- name: Set haproxy_connect_any flag on and keep it persistent across reboots
+  ansible.posix.seboolean:
+    name: haproxy_connect_any
+    state: true
+    persistent: true
