@@ -1,57 +1,57 @@
-# HashiCorp Vault Raft Cluster on QEMU/KVM
+# HAProxy High Availability on QEMU/KVM
 
-Automated three-node HashiCorp Vault lab built with OpenTofu, libvirt/QEMU/KVM, cloud-init, and Ansible. The project provisions AlmaLinux virtual machines, configures a Vault Integrated Storage (Raft) cluster, creates a private TLS certificate set, distributes it to every Vault node, and provides a Keepalived virtual IP for client access.
+Automated two-node HAProxy high-availability lab built with OpenTofu, libvirt/QEMU/KVM, cloud-init, Ansible, and Keepalived.
 
-The repository is designed as a portfolio lab showing infrastructure provisioning, configuration management, TLS, high availability, and a path toward Azure Key Vault auto-unseal.
+The project provisions two AlmaLinux 9 virtual machines, installs and configures HAProxy, configures rsyslog for HAProxy logging, applies SELinux-related settings, and uses Keepalived to provide a floating virtual IP (VIP) that can move between the two load-balancer nodes.
 
 ## Architecture
 
-| Component | Value |
+| Component | Implementation |
 | --- | --- |
 | Hypervisor | QEMU/KVM through libvirt |
-| IaC | OpenTofu |
-| Configuration | Ansible |
+| Infrastructure as Code | OpenTofu |
+| Configuration management | Ansible |
 | Guest OS | AlmaLinux 9 golden QCOW2 image |
-| Vault storage | Integrated Storage (Raft) |
-| Vault API | TCP/8200 with TLS |
-| Vault cluster traffic | TCP/8201 with TLS |
-| HA endpoint | Keepalived VIP `10.20.10.13` |
-| Nodes | `HCKVTEST01`, `HCKVTEST02`, `HCKVTEST03` |
+| Load balancer | HAProxy |
+| HA mechanism | Keepalived / VRRP in unicast mode |
+| Logging | rsyslog with dedicated `/var/log/haproxy.log` |
+| SELinux | `haproxy_connect_any` enabled persistently |
+| HAProxy frontend | TCP/80 |
+| HAProxy balancing algorithm | `leastconn` |
 
 ### Lab addressing
 
-| Node | Address | Purpose |
+| System | Address | Role |
 | --- | --- | --- |
-| HCKVTEST01 | `10.20.10.10` | Vault/Raft node 1 and initial certificate source |
-| HCKVTEST02 | `10.20.10.11` | Vault/Raft node 2 |
-| HCKVTEST03 | `10.20.10.12` | Vault/Raft node 3 |
-| Cluster VIP | `10.20.10.13` | Keepalived client endpoint |
+| `HAPRXTEST01` | `10.20.10.10` | HAProxy node 1 / Keepalived MASTER |
+| `HAPRXTEST02` | `10.20.10.11` | HAProxy node 2 / Keepalived BACKUP |
+| Keepalived VIP | `10.20.10.12/24` | Floating client endpoint |
+| Example backend | `10.10.40.13:80` | HAProxy backend configured in the current template |
 
 ## Deployment flow
 
 ```text
 OpenTofu
   |
-  +-- clone AlmaLinux QCOW2 disks
-  +-- create cloud-init ISO per VM
-  +-- configure static networking and SSH key
-  +-- create three libvirt/QEMU domains
-  +-- wait for TCP/22 on every VM
+  +-- clone the AlmaLinux QCOW2 golden image
+  +-- create cloud-init data for each VM
+  +-- configure static networking and SSH key access
+  +-- create two libvirt/QEMU domains
+  +-- wait until TCP/22 is available on every VM
   |
   v
 Ansible
   |
-  +-- install prerequisites and configure /etc/hosts
-  +-- generate TLS material on HCKVTEST01
-  +-- distribute TLS material to HCKVTEST02/HCKVTEST03
-  +-- install and configure Vault
-  +-- enable Raft retry_join
-  +-- open Vault API/cluster firewall ports
-  +-- initialize Vault on node 1
-  +-- install Keepalived and advertise the VIP
+  +-- install prerequisites, firewalld and SELinux utilities
+  +-- install/configure HAProxy
+  +-- configure rsyslog and HAProxy logging
+  +-- enable the HAProxy SELinux network boolean
+  +-- install/configure Keepalived
+  +-- deploy the HAProxy health-check script
+  +-- start and enable HAProxy and Keepalived
 ```
 
-OpenTofu invokes Ansible automatically after all configured VM addresses accept SSH connections.
+OpenTofu automatically invokes Ansible after SSH becomes available on all VMs.
 
 ## Repository layout
 
@@ -63,9 +63,13 @@ OpenTofu invokes Ansible automatically after all configured VM addresses accept 
 │   ├── main.yml
 │   ├── requirements.yml
 │   ├── group_vars/
+│   │   ├── all.yaml
+│   │   └── deploy_info.yaml
 │   ├── roles/
-│   ├── templates/
-│   └── secrets/              # intentionally excluded from public source
+│   │   ├── prerequisites_install/
+│   │   ├── haproxy_install/
+│   │   └── keepalived_install/
+│   └── templates/
 ├── Tofu/
 │   ├── providers.tf
 │   ├── vars.tf
@@ -80,122 +84,80 @@ OpenTofu invokes Ansible automatically after all configured VM addresses accept 
 
 ## Ansible role order
 
-The active `main.yml` applies these roles in order:
+The active playbook applies these roles in this order:
 
 1. `prerequisites_install`
-2. `hosts_configuration`
-3. `certificate_authority`
-4. `vault_certificate_install`
-5. `vault_install`
-6. `keepalived_install`
+2. `haproxy_install`
+3. `keepalived_install`
 
-The `approle_percona` role exists in the repository but is currently commented out in `main.yml`.
+## HAProxy configuration
 
-## TLS implementation
+The current `haproxy.cfg.j2` template defines:
 
-`certificate_authority` generates the TLS files on the first Vault node under `/opt/vault/tls` using `community.crypto` modules. The certificate SAN list contains the three node addresses, the Keepalived VIP, node names, cluster name, localhost, and the lab wildcard DNS name.
+- a frontend named `my_frontend` listening on `*:80`
+- HTTP mode
+- a backend named `my_backend`
+- `leastconn` balancing
+- cookie insertion using `appid`
+- one active example backend server: `10.10.40.13:80`
+- HAProxy statistics enabled inside the backend block at `/haproxy?stats`
+- HAProxy logs through `/dev/log` using rsyslog
 
-The active Vault listeners use:
+Additional multi-server examples exist in the template but are commented out.
 
-```text
-/opt/vault/tls/tls.crt
-/opt/vault/tls/tls.key
-/opt/vault/tls/tls_ca.pem
-```
+## Keepalived configuration
 
-The `vault_certificate_install` role fetches these files from node 1 to the Ansible controller and copies them to nodes 2 and 3 so all three Vault servers use the same certificate set.
+Keepalived is configured in unicast mode:
 
-See [docs/TLS.md](docs/TLS.md).
+- `HAPRXTEST01` starts as `MASTER` with priority `100`
+- `HAPRXTEST02` starts as `BACKUP` with priority `99`
+- virtual router ID: `90`
+- VIP: `10.20.10.12/24`
+- interface: `eth0`
+- HAProxy is checked every 2 seconds
 
-## Vault Raft configuration
-
-Every node uses `storage "raft"` with `/opt/vault/data` and its own `node_id`. Each generated configuration contains `retry_join` entries for all three Vault FQDNs.
-
-`cluster_addr` is node-specific and uses TCP/8201. `api_addr` uses the cluster DNS name and TCP/8200.
-
-See [docs/VAULT-RAFT.md](docs/VAULT-RAFT.md).
-
-## Keepalived high availability
-
-Keepalived is installed on every node with unicast VRRP. Priorities in the delivered templates are:
-
-- node 1: `100`
-- node 2: `99`
-- node 3: `98`
-
-The VIP is `10.20.10.13`. A health script checks the local Vault `/v1/sys/health` endpoint and allows Keepalived to move the VIP when the health check fails.
-
-See [docs/HIGH-AVAILABILITY.md](docs/HIGH-AVAILABILITY.md).
-
-## Azure Key Vault auto-unseal
-
-The repository contains a private-secrets loading step in `vault_install` and is prepared for an Azure Key Vault auto-unseal configuration, but the active Vault HCL templates do **not** currently contain a `seal "azurekeyvault"` stanza. Therefore Azure auto-unseal is documented as an optional extension, not as an enabled feature.
-
-The private `secrets/secrets.yml` file is intentionally not included in the public project. An example structure is provided in `Ansible/secrets.example.yml` with placeholders only.
-
-Expected private structure:
-
-```yaml
-secret:
-  tenant_id: "00000000-0000-0000-0000-000000000000"
-  client_id: "00000000-0000-0000-0000-000000000000"
-  client_secret: "REPLACE_WITH_PRIVATE_VALUE"
-  vault_name: "azure-keyvault"
-  key_name: "azure-keyvault"
-```
-
-See [docs/AZURE-AUTO-UNSEAL.md](docs/AZURE-AUTO-UNSEAL.md).
-
-## Security note
-
-Do not publish or commit any of the following:
-
-- `Ansible/secrets/secrets.yml`
-- `Ansible/.vault_pass`
-- generated TLS private keys
-- Vault initialization output (`/opt/vault/init.file`)
-- OpenTofu state files
-- local `.terraform/` contents
-
-See [docs/SECURITY.md](docs/SECURITY.md).
+The deployed health script checks whether the `haproxy` systemd service is active. If HAProxy is not active, the script stops Keepalived on that node.
 
 ## Deployment
 
-For the current code path, running OpenTofu provisions the infrastructure and then invokes Ansible automatically:
+From the `Tofu/` directory:
 
 ```bash
-cd Tofu
 tofu init
 tofu validate
 tofu plan
 tofu apply
 ```
 
-The included `apply.sh` performs those commands sequentially.
+The included `apply.sh` runs these commands sequentially.
 
-Before running the project, review the path and environment assumptions documented in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+After OpenTofu creates both VMs, the `terraform_data.wait_for_ssh` resource waits for SSH and `terraform_data.run_ansible` installs the declared Ansible collection dependencies and executes `main.yml`.
+
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) before running the lab.
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [OpenTofu](docs/OPENTOFU.md)
 - [Ansible](docs/ANSIBLE.md)
-- [Vault Raft](docs/VAULT-RAFT.md)
-- [TLS](docs/TLS.md)
+- [HAProxy](docs/HAPROXY.md)
 - [High Availability](docs/HIGH-AVAILABILITY.md)
-- [Azure Key Vault Auto-Unseal](docs/AZURE-AUTO-UNSEAL.md)
+- [Logging and SELinux](docs/LOGGING-SELINUX.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Security](docs/SECURITY.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 
 ## Current implementation notes
 
-The documentation reflects the uploaded code exactly. A few implementation details should be reviewed before publishing or reusing the lab:
+The documentation reflects the uploaded code as delivered. Important current-state observations:
 
-- `Tofu/providers.tf` references `../Ansible/config/ansible.cfg`, while the uploaded repository contains `Ansible/ansible.cfg`.
-- `Ansible/requirements.yml` currently lists `ansible.mysql`, while the active roles also use `community.crypto` and `ansible.posix` modules.
-- `Tofu/storage.tf` uses a hard-coded base-image URL rather than `var.vm_base_image_path`.
-- `vault_install` initializes Vault and writes the initialization output to `/opt/vault/init.file`; this file is highly sensitive.
-- Azure Key Vault auto-unseal variables are private inputs but are not yet wired into the active HCL templates.
+- `Tofu/providers.tf` points to `../Ansible/config/ansible.cfg`, while the repository contains `Ansible/ansible.cfg`.
+- `Ansible/requirements.yml` installs `ansible.mysql`, but the active roles do not use MySQL modules. The playbook does use `ansible.posix` modules, which are not declared in `requirements.yml`.
+- `Tofu/storage.tf` hard-codes `file:///home/gesora/Templates/al9-golden-build.qcow2` instead of using `var.vm_base_image_path`.
+- The active HAProxy backend is hard-coded to `10.10.40.13:80` in the Jinja template.
+- Firewalld is enabled, but the current prerequisites role explicitly opens only TCP/22. The HAProxy listener on TCP/80 and Keepalived/VRRP traffic are not explicitly allowed by the current Ansible tasks.
+- The Keepalived authentication password is hard-coded in both templates.
+- `health_check_url.sh.j2`, `haproxy_logrotate.conf.j2`, and the generated `rsyslog-haproxy.te` policy source are present, but they are not fully wired into the active runtime configuration.
+- The repository archive contains local OpenTofu state, `.terraform/`, and `terraform.tfvars` even though the project `.gitignore` is configured to ignore them.
 
-These are documented as current-state observations rather than silently represented as completed functionality.
+These are documented as implementation details and improvement opportunities rather than represented as completed functionality.

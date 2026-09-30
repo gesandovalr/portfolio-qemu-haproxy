@@ -1,41 +1,65 @@
-# Deployment
+# Deployment Guide
 
-## Controller prerequisites
+## Host prerequisites
 
-The controller running OpenTofu/Ansible needs at least:
+The workstation running OpenTofu needs:
 
 - OpenTofu
-- libvirt/QEMU/KVM access
-- the `dmacvicar/libvirt` provider
+- libvirt/QEMU/KVM
+- a working libvirt network matching `vm_network_name`
+- access to the configured libvirt storage pool
+- `nc` / netcat
 - Ansible
-- `ansible-galaxy`
-- `nc`/netcat for the SSH readiness loop
-- SSH access to the guest VMs
+- Ansible Galaxy access if collections are not already local
+- an SSH key pair matching the public key configured in `terraform.tfvars`
 
-## Infrastructure prerequisites
+## Current lab assumptions
 
 The delivered configuration assumes:
 
-- an existing libvirt network named `LAN`
-- a libvirt storage pool named `Virtual_Machines`
-- a local AlmaLinux golden image
-- gateway `10.20.10.1`
-- no conflicting addresses at `.10`, `.11`, `.12`, or `.13`
-- SSH public/private key pair matching the OpenTofu and Ansible configuration
-
-## Private Ansible configuration
-
-Create a private encrypted file at:
-
 ```text
-Ansible/secrets/secrets.yml
+libvirt pool: Virtual_Machines
+base image: /home/gesora/Templates/al9-golden-build.qcow2
+network: LAN
+DNS/search domain: lab.local
+gateway: 10.20.10.1
+VM addresses: 10.20.10.10 and 10.20.10.11
+VIP: 10.20.10.12
 ```
 
-For the optional Azure auto-unseal extension, start from `Ansible/secrets.example.yml` and replace placeholders locally.
+## Before running
 
-The repository also expects an Ansible Vault password source through `.vault_pass` as configured in `ansible.cfg`. Do not commit it.
+Review these files:
 
-## Apply
+```text
+Tofu/terraform.tfvars
+Tofu/storage.tf
+Ansible/inventory.yml
+Ansible/group_vars/deploy_info.yaml
+Ansible/templates/haproxy.cfg.j2
+Ansible/templates/keepalived.conf-h1.j2
+Ansible/templates/keepalived.conf-h2.j2
+```
+
+The same node addresses are declared in both OpenTofu and Ansible and should remain consistent.
+
+## Important configuration issue
+
+`Tofu/providers.tf` currently sets:
+
+```text
+ANSIBLE_CONFIG=${path.module}/../Ansible/config/ansible.cfg
+```
+
+but the repository contains:
+
+```text
+Ansible/ansible.cfg
+```
+
+Correct the path or create the expected directory before relying on automatic Ansible execution.
+
+## Deploy
 
 ```bash
 cd Tofu
@@ -45,36 +69,48 @@ tofu plan
 tofu apply
 ```
 
-OpenTofu waits for SSH and then calls Ansible automatically.
-
-## Current configuration-path issue
-
-Before running, review `Tofu/providers.tf`. It currently sets:
-
-```text
-../Ansible/config/ansible.cfg
-```
-
-while the uploaded project contains:
-
-```text
-../Ansible/ansible.cfg
-```
-
-These paths must agree for the intended configuration to be loaded.
-
-## Verify Vault services
-
-Useful post-deployment checks include:
+Or use:
 
 ```bash
-systemctl status vault
-systemctl status keepalived
-vault status
+./apply.sh
 ```
 
-For Raft, use the Vault operator commands after authenticating with appropriate credentials.
+OpenTofu waits for SSH on both VMs before starting Ansible.
+
+## Post-deployment checks
+
+On each node:
+
+```bash
+systemctl status haproxy
+systemctl status keepalived
+systemctl status rsyslog
+```
+
+Validate HAProxy configuration:
+
+```bash
+haproxy -c -f /etc/haproxy/haproxy.cfg
+```
+
+Check the VIP:
+
+```bash
+ip addr show eth0
+```
+
+Check HAProxy logs:
+
+```bash
+tail -f /var/log/haproxy.log
+```
 
 ## Destroy
 
-The included script runs `tofu destroy` and removes the three VM IP addresses from the local SSH known_hosts file.
+The included script runs:
+
+```bash
+tofu destroy
+```
+
+and removes SSH known-host entries for `10.20.10.10` and `10.20.10.11`.

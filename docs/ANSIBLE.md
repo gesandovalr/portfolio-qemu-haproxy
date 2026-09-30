@@ -1,90 +1,96 @@
-# Ansible
+# Ansible Implementation
 
 ## Inventory
 
-The inventory defines a single `hashicorp_vault_cluster` group:
+The inventory defines one group named `haproxy`:
+
+| Inventory host | Address |
+| --- | --- |
+| HAPRXTEST01 | 10.20.10.10 |
+| HAPRXTEST02 | 10.20.10.11 |
+
+Group variables specify:
 
 ```text
-HCKVTEST01 -> 10.20.10.10
-HCKVTEST02 -> 10.20.10.11
-HCKVTEST03 -> 10.20.10.12
+ansible_user = almalinux
+ansible_ssh_private_key_file = ~/.ssh/id_ed25519
 ```
 
-All hosts use:
+## Playbook
 
-- `ansible_user: almalinux`
-- `~/.ssh/id_ed25519`
+`main.yml` runs against all hosts with privilege escalation enabled.
 
-## Shared variables
+Role order:
 
-`group_vars/deploy_info.yaml` defines the three node IP addresses, the Keepalived VIP, DNS labels, short names, FQDNs, domain, cluster name, and network interface.
+1. `prerequisites_install`
+2. `haproxy_install`
+3. `keepalived_install`
 
-The delivered environment uses:
+## Variables
 
-```text
-Domain: lab.local
-Cluster: HCKVCLUSTER01
-VIP: 10.20.10.13
-Interface: eth0
+`group_vars/deploy_info.yaml` defines:
+
+- HAProxy/Keepalived node IP addresses
+- VIP `10.20.10.12`
+- node hostnames
+- interface name `eth0`
+
+`group_vars/all.yaml` sets:
+
+```yaml
+allow_world_readable_tmpfiles: true
 ```
 
-## Playbook order
+## prerequisites_install
 
-`main.yml` runs six active stages:
+The prerequisites role currently:
 
-1. prerequisites + host configuration
-2. certificate authority/certificate generation
-3. certificate distribution
-4. Vault installation/configuration
-5. Keepalived installation/configuration
-6. gathered-facts cleanup
+- imports the EPEL 9 RPM signing key
+- installs the EPEL 9 release package
+- installs and enables firewalld
+- installs `policycoreutils-python-utils`
+- opens TCP/22 in firewalld
+- installs `net-tools`
+- installs `telnet`
+- installs `bind-utils`
 
-The `approle_percona` play is present but commented out.
+## haproxy_install
 
-## Role summary
+The HAProxy role:
 
-### prerequisites_install
+- installs the latest available `haproxy` package
+- renders `/etc/haproxy/haproxy.cfg`
+- prepares `/var/lib/haproxy/dev`
+- prepares `/usr/libexec/haproxy`
+- deploys `health_check_url.sh`
+- restores SELinux contexts under `/usr/libexec/haproxy`
+- configures rsyslog integration
+- renders an SELinux policy source file to `/tmp/rsyslog-haproxy.te`
+- enables `haproxy_connect_any`
+- restarts rsyslog
+- starts and enables HAProxy
 
-Installs supporting OS/Python packages, enables firewalld, creates `/opt/vault`, `/opt/vault/tls`, and `/opt/vault/data`, enables EPEL, and adds the HashiCorp RHEL repository.
+The SELinux `.te` file is rendered but the module compilation/install command is commented out.
 
-### hosts_configuration
+## keepalived_install
 
-Renders `/etc/hosts` from `templates/hosts.j2`.
+The Keepalived role:
 
-### certificate_authority
+- installs Keepalived
+- renders a MASTER configuration on node 1
+- renders a BACKUP configuration on node 2
+- deploys `/usr/libexec/keepalived/check_haproxy.sh`
+- changes the script context with `chcon`
+- subsequently runs `restorecon`
+- starts and enables Keepalived
 
-Uses `community.crypto` to create the key, CSR, self-signed CA certificate, and a CA-signed certificate file on node 1.
+## Collections
 
-### vault_certificate_install
-
-Fetches the generated TLS material from node 1 to the Ansible controller and copies it to nodes 2 and 3.
-
-### vault_install
-
-Loads `secrets/secrets.yml`, installs Vault, renders a node-specific `vault.hcl`, opens ports 8200/8201, trusts the generated certificate, starts Vault, and initializes Vault on node 1.
-
-### keepalived_install
-
-Installs Keepalived, deploys a Vault health-check script, deploys node-specific VRRP configuration, enables VRRP in firewalld, and restarts/enables Keepalived.
-
-## Collection requirements
-
-The delivered `requirements.yml` currently declares only:
+The delivered `requirements.yml` contains:
 
 ```yaml
 collections:
   - name: ansible.mysql
 ```
 
-However, active tasks also use:
-
-- `community.crypto`
-- `ansible.posix`
-
-Those collections must be available on the controller for the current roles to work. This is a current repository dependency gap and is documented rather than hidden.
-
-## Private variables
-
-`vault_install` includes `secrets/secrets.yml`. This file is intentionally excluded from the public documentation package.
-
-A safe placeholder file is included as `Ansible/secrets.example.yml`.
+The active HAProxy roles do not use `ansible.mysql`. They do use modules from `ansible.posix`, including `firewalld` and `seboolean`, so the requirements file does not currently describe the actual active collection dependency set.

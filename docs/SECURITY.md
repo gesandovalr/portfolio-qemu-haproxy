@@ -1,56 +1,51 @@
-# Security
+# Security Notes
 
-## Files that must remain private
+## SSH
 
-Do not publish:
+Cloud-init configures key-based access for the `almalinux` user and disables password SSH authentication.
 
-```text
-Ansible/secrets/secrets.yml
-Ansible/.vault_pass
-Ansible/buffer/tls.key
-/opt/vault/init.file
-Tofu/terraform.tfstate
-Tofu/terraform.tfstate.backup
-Tofu/.terraform/
-```
+The Ansible inventory disables SSH host-key checking through `ansible.cfg`, which is convenient for a disposable lab but should be reconsidered for production environments.
 
-The Vault initialization output can contain root/recovery/unseal material depending on the seal configuration and must be handled as a high-value secret.
+## Firewalld
 
-## Azure auto-unseal secrets
+The prerequisites role installs/enables firewalld and explicitly opens TCP/22.
 
-The intended private Azure variables are:
+The current code does not explicitly open:
 
-- `tenant_id`
-- `client_id`
-- `client_secret`
-- `vault_name`
-- `key_name`
+- TCP/80 for the HAProxy frontend
+- VRRP protocol 112 between Keepalived peers
+- UDP/514 despite enabling UDP rsyslog reception
 
-Only the example schema belongs in the public repository. Actual values should live in an Ansible Vault-encrypted file or another approved secret-management mechanism.
-
-## TLS private key
-
-The delivered lab distributes the same `tls.key` to all Vault nodes. This simplifies the portfolio lab, but the key must never be committed or left in an Ansible controller buffer inside the public repository.
+Whether traffic works depends on the existing firewall zone/policy and host environment. These rules should be made explicit for a portable deployment.
 
 ## Keepalived authentication
 
-The current Keepalived templates contain a static VRRP authentication value. Treat it as a lab placeholder and replace it for non-lab use.
+The VRRP authentication password is hard-coded in the Jinja templates:
 
-## OpenTofu state
-
-State can contain infrastructure details and possibly sensitive outputs. Public repositories should ignore state and use a remote/state backend appropriate to the environment.
-
-## Source-control recommendations
-
-At minimum, ignore:
-
-```gitignore
-Ansible/.vault_pass
-Ansible/secrets/secrets.yml
-Ansible/buffer/
-Tofu/.terraform/
-Tofu/*.tfstate
-Tofu/*.tfstate.*
+```text
+auth_pass mypass$444
 ```
 
-Do not commit credentials even if the repository is private unless the credential-storage design explicitly permits it.
+Treat it as a lab placeholder. Store reusable credentials in protected Ansible variables or Vault rather than source-controlled templates.
+
+## HAProxy backend
+
+The backend address is currently embedded directly in `haproxy.cfg.j2`. Moving backend definitions into variables would make the deployment safer and easier to review.
+
+## SELinux
+
+The project keeps SELinux integration rather than disabling SELinux. It enables `haproxy_connect_any` persistently and attempts to assign an executable context to the Keepalived health-check script.
+
+Review the current `chcon` followed by `restorecon` sequence because the latter may undo the former unless a persistent file-context rule exists.
+
+## Repository hygiene
+
+The repository `.gitignore` files intend to exclude:
+
+- `.terraform/`
+- `*.tfstate*`
+- `*.tfvars`
+- Ansible local collections
+- Ansible secrets and vault password files
+
+However, the uploaded archive still contains `.terraform/`, OpenTofu state files and `terraform.tfvars`. These should not be included in a public portfolio repository if they expose environment-specific information.

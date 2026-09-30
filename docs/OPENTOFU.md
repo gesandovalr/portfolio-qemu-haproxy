@@ -1,81 +1,108 @@
-# OpenTofu
+# OpenTofu Implementation
 
 ## Provider
 
-The project declares the `dmacvicar/libvirt` provider and uses libvirt resources for disks, cloud-init media, and KVM domains.
+The project uses:
 
-## Variables
+```hcl
+source = "dmacvicar/libvirt"
+```
 
-Important declared variables include:
+The lock file in the delivered repository resolves libvirt provider `0.9.9`.
 
-- `vm_pool_name`
-- `vm_pool_path`
-- `vm_base_template_name`
-- `vm_base_image_path`
-- `vm_ssh_public_key`
-- `vm_network_name`
-- `vm_disk_capacity`
-- `vm_domain_name`
-- `vm_gateway`
-- `VMS`
+## VM definitions
 
-`VMS` is a map containing VM name, memory, vCPU, static IPv4 address, and netmask.
+`var.VMS` is a map of VM objects containing:
+
+- `name`
+- `memory`
+- `vcpu`
+- `ipv4_add_nic`
+- `netmask`
+
+The current `terraform.tfvars` defines:
+
+| VM | Address | vCPU | Memory |
+| --- | --- | ---: | ---: |
+| HAPRXTEST01 | 10.20.10.10/24 | 2 | 2048 MiB |
+| HAPRXTEST02 | 10.20.10.11/24 | 2 | 2048 MiB |
 
 ## Storage
 
-`storage.tf` creates one QCOW2 disk per VM. In the delivered code, the base image source is hard-coded as:
+`storage.tf` creates one QCOW2 disk for each VM.
+
+The current implementation clones this hard-coded image:
 
 ```text
-file:///home/gesora/Templates/al9-golden-build.qcow2
+/home/gesora/Templates/al9-golden-build.qcow2
 ```
 
-Although `vm_base_image_path` exists as a variable, it is not currently used by `storage.tf`.
+Although variables exist for `vm_base_image_path` and `vm_base_template_name`, `storage.tf` currently does not consume `vm_base_image_path`.
 
 ## Cloud-init
 
-Cloud-init creates the `almalinux` account with:
+Cloud-init performs the initial guest configuration:
 
-- password login disabled
-- root login disabled
-- passwordless sudo
-- SSH authorized key from `vm_ssh_public_key`
+- creates/uses the `almalinux` account
+- locks password authentication for that account
+- grants passwordless sudo
+- injects the configured SSH public key
+- disables SSH password authentication
+- disables root login through cloud-init
+- assigns hostname and FQDN
+- configures static IPv4 networking
+- configures the default route
+- configures Google DNS (`8.8.8.8`, `8.8.4.4`)
+- configures the search domain
 
-Networking is configured statically on `eth0` and includes DNS resolvers plus the configured search domain.
+## VM hardware
 
-## VM resources
+The domain resource uses:
 
-Each VM uses Q35, host-passthrough CPU, VirtIO devices, and a cloud-init CD-ROM.
+- machine type `q35`
+- architecture `x86_64`
+- CPU mode `host-passthrough`
+- VirtIO OS disk
+- VirtIO network interface
+- VNC bound to `127.0.0.1`
+- VirtIO video
 
-## Ansible handoff
+The cloud-init ISO is attached as a SATA CD-ROM.
 
-After domain creation, `terraform_data.wait_for_ssh` polls TCP/22 for every `VMS` address.
+## SSH readiness
 
-Then `terraform_data.run_ansible`:
+After the libvirt domains are created, `terraform_data.wait_for_ssh` loops over every configured VM IP and checks TCP/22 using `nc`.
 
-1. changes working directory to `../Ansible`
-2. installs Galaxy collections from `requirements.yml` into `./collections`
+Ansible does not run until all configured addresses accept SSH connections.
+
+## Automatic Ansible execution
+
+`terraform_data.run_ansible`:
+
+1. changes to the `Ansible/` directory
+2. runs `ansible-galaxy collection install -r ./requirements.yml -p ./collections`
 3. invokes `ansible-playbook -i ./inventory.yml ./main.yml`
 
-### Current path caveat
+The resource is replaced when:
 
-The environment variable in the delivered code is:
-
-```text
-ANSIBLE_CONFIG=${path.module}/../Ansible/config/ansible.cfg
-```
-
-but the uploaded repository contains `Ansible/ansible.cfg`, not `Ansible/config/ansible.cfg`. Review this path before running the deployment.
-
-## Trigger behavior
-
-The Ansible `terraform_data` resource is replaced when:
-
-- the `VMS` object changes
+- `var.VMS` changes
 - `Ansible/requirements.yml` changes
 - `Ansible/main.yml` changes
 
-Changes inside individual roles/templates are not currently included in `triggers_replace`.
+Changes inside roles or templates are not included in the current `triggers_replace` expression.
 
-## Local state
+## Current path mismatch
 
-The uploaded development tree contains local OpenTofu state and provider-cache files. These should not be committed to a public portfolio repository. See `SECURITY.md`.
+The command sets:
+
+```text
+ANSIBLE_CONFIG=../Ansible/config/ansible.cfg
+```
+
+relative to the OpenTofu module, but the delivered repository contains:
+
+```text
+Ansible/ansible.cfg
+```
+
+Review this path before deployment.

@@ -1,62 +1,121 @@
 # Troubleshooting
 
+## OpenTofu creates VMs but Ansible does not run
+
+Check the configured `ANSIBLE_CONFIG` path in `Tofu/providers.tf`.
+
+The delivered code references:
+
+```text
+Ansible/config/ansible.cfg
+```
+
+while the repository contains:
+
+```text
+Ansible/ansible.cfg
+```
+
+Also confirm `ansible-playbook` and `ansible-galaxy` are available in the shell running OpenTofu.
+
 ## OpenTofu waits forever for SSH
 
-Check that:
+Verify:
 
-- every VM IP in `VMS` is reachable from the controller
-- TCP/22 is open
-- cloud-init applied the expected static address
-- the configured libvirt network routes to the controller
+```bash
+ping 10.20.10.10
+ping 10.20.10.11
+nc -zv 10.20.10.10 22
+nc -zv 10.20.10.11 22
+```
 
-## Ansible configuration not found
+Check that the libvirt network, gateway, cloud-init network configuration and host routes are correct.
 
-The delivered OpenTofu command references `Ansible/config/ansible.cfg`, but the uploaded file is `Ansible/ansible.cfg`. Correct the path before deployment.
+## HAProxy will not start
 
-## Missing Ansible collection
+Validate the configuration:
 
-Active roles use `community.crypto` and `ansible.posix`, while the delivered `requirements.yml` contains only `ansible.mysql`. If module resolution fails, install/add the collections required by the active roles.
+```bash
+haproxy -c -f /etc/haproxy/haproxy.cfg
+```
 
-## Certificate-generation task is skipped
+Inspect logs:
 
-Several role conditions compare `ansible_hostname` against FQDN variables such as `node_01_fqdn`. Confirm what `ansible_hostname` resolves to in your environment and that it matches the configured comparison values.
+```bash
+journalctl -u haproxy -n 100 --no-pager
+```
 
-## Vault does not start
+Check that the backend configuration is valid for the current environment.
+
+## Clients cannot reach the VIP on TCP/80
+
+Check VIP ownership:
+
+```bash
+ip addr show eth0
+```
+
+Check HAProxy listener:
+
+```bash
+ss -lntp | grep ':80'
+```
+
+Check firewalld:
+
+```bash
+firewall-cmd --list-all
+```
+
+The delivered prerequisites role opens only TCP/22, so TCP/80 may need an explicit rule.
+
+## Keepalived nodes cannot see each other
+
+The project uses unicast VRRP. Confirm IP reachability between `10.20.10.10` and `10.20.10.11` and inspect:
+
+```bash
+journalctl -u keepalived -n 100 --no-pager
+```
+
+If host firewall policy blocks protocol 112, add the appropriate VRRP allowance.
+
+## VIP does not fail over when HAProxy stops
+
+Check the health script manually:
+
+```bash
+/usr/libexec/keepalived/check_haproxy.sh
+```
+
+Check its SELinux context:
+
+```bash
+ls -Z /usr/libexec/keepalived/check_haproxy.sh
+```
+
+The role runs both `chcon` and `restorecon`; verify the resulting context permits Keepalived to execute the script.
+
+## No `/var/log/haproxy.log`
 
 Check:
 
 ```bash
-journalctl -u vault -n 200 --no-pager
-vault status
+systemctl status rsyslog
+ls -l /var/lib/haproxy/dev/log
+logger -p local0.info 'HAProxy logging test'
+tail -f /var/log/haproxy.log
 ```
 
-Then verify:
-
-- `/etc/vault.d/vault.hcl` syntax
-- ownership/SELinux context
-- TLS file presence and permissions
-- DNS/FQDN resolution
-- ports 8200 and 8201
-
-## Raft node does not join
-
-Check connectivity to every `retry_join` endpoint, TLS trust, DNS resolution, and whether the first Vault node has already been initialized.
-
-## Keepalived does not hold the VIP
-
-Check:
+Inspect SELinux denials if necessary:
 
 ```bash
-systemctl status keepalived
-journalctl -u keepalived -n 200 --no-pager
-/usr/libexec/keepalived/vault-health https://localhost:8200/v1/sys/health
-echo $?
+ausearch -m AVC -ts recent
 ```
 
-The delivered health script considers only HTTP 200 healthy.
+The supplied rsyslog SELinux `.te` policy is rendered but not compiled/installed by the active role.
 
-## Azure auto-unseal does not activate
+## Ansible cannot find `ansible.posix`
 
-The active templates do not yet contain `seal "azurekeyvault"`. Merely defining values in `secrets.yml` does not enable auto-unseal. The seal stanza (or corresponding environment variables) must be configured before Vault starts.
+The active code uses `ansible.posix.firewalld` and `ansible.posix.seboolean`, but `requirements.yml` currently declares only `ansible.mysql`.
 
-Do not retrofit auto-unseal to an initialized cluster without following a seal-migration procedure.
+Install the missing collection or update `requirements.yml` accordingly.

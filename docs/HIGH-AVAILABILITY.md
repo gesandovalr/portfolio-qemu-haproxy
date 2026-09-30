@@ -2,36 +2,82 @@
 
 ## VIP
 
-The lab defines a client VIP:
+The floating service address is:
 
 ```text
-10.20.10.13
+10.20.10.12/24
 ```
 
-## VRRP priorities
+## Node roles
 
-| Node | Priority |
-| --- | ---: |
-| HCKVTEST01 | 100 |
-| HCKVTEST02 | 99 |
-| HCKVTEST03 | 98 |
+### HAPRXTEST01
 
-The configuration uses unicast VRRP peers and `virtual_router_id 90`.
+- state: `MASTER`
+- priority: `100`
+- source address: `10.20.10.10`
+- peer: `10.20.10.11`
 
-## Health check
+### HAPRXTEST02
 
-The installed health script is invoked with:
+- state: `BACKUP`
+- priority: `99`
+- source address: `10.20.10.11`
+- peer: `10.20.10.10`
+
+## VRRP configuration
+
+Both nodes use:
+
+- interface `eth0`
+- virtual router ID `90`
+- advertisement interval `1`
+- unicast peer mode
+
+The templates include VRRP PASS authentication with a hard-coded password. This should be moved out of the template before reuse outside a lab.
+
+## HAProxy tracking
+
+Keepalived executes:
 
 ```text
-https://localhost:8200/v1/sys/health
+/usr/libexec/keepalived/check_haproxy.sh
 ```
 
-It treats HTTP `200` as healthy. Keepalived tracks this script and the configured interface.
+every 2 seconds.
 
-## Firewall
+The script checks:
 
-The role adds a firewalld rich rule allowing VRRP.
+```bash
+systemctl is-active --quiet haproxy
+```
 
-## Operational note
+If HAProxy is not active, the script executes:
 
-Vault's `/v1/sys/health` endpoint can return different status codes depending on active/standby/sealed state. The delivered script checks only for 200, so its failover semantics correspond to the exact script in the repository and may be intentionally stricter than a broader HA health policy.
+```bash
+systemctl stop keepalived
+```
+
+This causes the local node to stop participating so that the peer can take ownership of the VIP.
+
+## Validation
+
+Check VIP ownership:
+
+```bash
+ip addr show eth0
+```
+
+Check Keepalived status:
+
+```bash
+systemctl status keepalived
+journalctl -u keepalived
+```
+
+Check HAProxy status:
+
+```bash
+systemctl status haproxy
+```
+
+A simple failover test is to stop HAProxy on the active node and confirm that the VIP appears on the peer.
